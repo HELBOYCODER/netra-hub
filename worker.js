@@ -358,6 +358,17 @@ export default {
 			if (Router.isWebSocketUpgrade(request)) {
 				return await Router.handleWebSocket(request, env, ctx);
 			}
+			if (url.pathname.startsWith("/npv/")) {
+				const subUser = safeDecodeURI(url.pathname.slice(5));
+				const u = await env.DB.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR uuid = ?").bind(subUser, subUser).first();
+				if (!u) return new Response("User not found", { status: 404 });
+				const host = url.hostname;
+				const dynPath = encodeURIComponent("/stream/PANEL_ZEUS/" + ((u.uuid || "").split("-")[4] || "default"));
+				const isUnlim = (!u.limit_gb || u.limit_gb === 0) && (!u.expiry_days || u.expiry_days === 0);
+				const volTag = isUnlim ? "♾️ آن‌لیمیتد" : (u.limit_gb ? u.limit_gb + "GB" : "Free");
+				const npvConfig = "vless://" + u.uuid + "@www.speedtest.net:443?path=" + dynPath + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "#" + encodeURIComponent("🚀 NPV Tunnel | " + u.username + " (" + volTag + ")");
+				return new Response(npvConfig, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+			}
 			if (Router.isSubscriptionPath(url.pathname)) {
 				return await Router.handleSubscription(url, env);
 			}
@@ -10719,7 +10730,8 @@ async function handleTelegramWebhook(request, env, url) {
 					{ text: "⏳ تغییر زمان", callback_data: "ask_days_" + u.id }
 				],
 				[
-					{ text: "🔗 ارسال QR Code و ساب", callback_data: "send_qr_" + u.id }
+					{ text: "🔗 ارسال QR Code و ساب", callback_data: "send_qr_" + u.id },
+					{ text: "🚀 کانفیگ تک‌بر NPV", callback_data: "send_npv_" + u.id }
 				],
 				[
 					{ text: "🗑️ حذف کاربر", callback_data: "ask_del_" + u.id }
@@ -10830,7 +10842,7 @@ async function handleTelegramWebhook(request, env, url) {
 			"سرورهای بهینه‌شده زئوس برای تمامی اپراتورها (همراه اول، ایرانسل، رایتل، مخابرات).\n\n" +
 			"🔹 <b>دستورات عمومی:</b>\n" +
 			"• <code>/sub [نام]</code> : دریافت لینک و QR Code\n" +
-			"• <code>/status [نام]</code> : بررسی مانده ترافیک و اعتبار\n\n" +
+			"• <code>/status [نام]</code> : بررسی مانده ترافیک و اعتبار\n• <code>/npv [نام]</code> : دریافت کانفیگ تک‌بر مخصوص NapsternetV\n\n" +
 			"🔸 <b>بخش فروش و مدیریت:</b>\n" +
 			"• <b>لیست و مدیریت کاربران:</b> <code>/users</code>\n" +
 			"• <b>ساخت کاربر جدید:</b> <code>/add</code>\n" +
@@ -10927,6 +10939,32 @@ async function handleTelegramWebhook(request, env, url) {
 		const card = formatUserCard(user);
 		if (messageId) await editMsg(chatId, messageId, "🔄 ترافیک کاربر صفر شد.\n\n" + card.text, card.keyboard);
 		else await sendMsg(chatId, "🔄 ترافیک کاربر صفر شد.\n\n" + card.text, card.keyboard);
+		return new Response("OK", { status: 200 });
+	}
+
+	// SEND NPV SINGLE CONFIG
+	if (data && data.startsWith("send_npv_")) {
+		const uid = parseInt(data.split("_")[2]);
+		const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(uid).first();
+		if (!user) return new Response("OK", { status: 200 });
+		const dynPath = encodeURIComponent("/stream/PANEL_ZEUS/" + ((user.uuid || "").split("-")[4] || "default"));
+		const isUnlim = (!user.limit_gb || user.limit_gb === 0) && (!user.expiry_days || user.expiry_days === 0);
+		const volTag = isUnlim ? "♾️ آن‌لیمیتد" : (user.limit_gb ? user.limit_gb + "GB" : "Free");
+		
+		const npvDirect = "vless://" + user.uuid + "@www.speedtest.net:443?path=" + dynPath + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "#" + encodeURIComponent("🚀 NPV Tunnel | " + user.username + " (" + volTag + ")");
+		const npvFrag = "vless://" + user.uuid + "@104.21.40.3:443?path=" + dynPath + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "&fragment=100-200,1-1#" + encodeURIComponent("🧠 NPV Fragment | " + user.username + " (" + volTag + ")");
+
+		const npvMsg = "🚀 <b>کانفیگ تک‌بر مخصوص NapsternetV (NPV Tunnel):</b>\n\n" +
+			"👤 کاربر: <b>" + user.username + (isUnlim ? " (♾️ آن‌لیمیتد)" : "") + "</b>\n" +
+			"📦 سقف حجم: <b>" + (user.limit_gb ? user.limit_gb + " GB" : "نامحدود") + "</b>\n" +
+			"⏳ مدت اعتبار: <b>" + (user.expiry_days ? user.expiry_days + " روز" : "نامحدود") + "</b>\n\n" +
+			"⚡ <b>کانفیگ ۱ (پرسرعت Speedtest CDN):</b>\n<code>" + npvDirect + "</code>\n\n" +
+			"🧠 <b>کانفیگ ۲ (ضد فیلتر هوشمند Fragment):</b>\n<code>" + npvFrag + "</code>\n\n" +
+			"💡 <b>راهنمای استفاده در NapsternetV:</b>\nروی متن کادر بالا بزنید تا کپی شود. در برنامه NapsternetV دکمه <b>+</b> را بزنید و گزینه <b>Import config from Clipboard</b> را انتخاب کنید.";
+
+		await sendMsg(chatId, npvMsg, {
+			inline_keyboard: [[{ text: "👤 مدیریت همین کاربر", callback_data: "view_u_" + user.id }]]
+		});
 		return new Response("OK", { status: 200 });
 	}
 
@@ -11347,6 +11385,40 @@ async function handleTelegramWebhook(request, env, url) {
 			}
 			return new Response("OK", { status: 200 });
 		}
+	}
+
+	// FAST COMMAND: /npv <username>
+	if (text.startsWith("/npv")) {
+		const parts = text.split(" ").filter(Boolean);
+		if (parts.length < 2) {
+			await sendMsg(chatId, "⚠️ لطفاً نام کاربر را وارد کنید:\n<code>/npv username</code>");
+			return new Response("OK", { status: 200 });
+		}
+		const uname = parts[1];
+		const user = await env.DB.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR uuid = ?").bind(uname, uname).first();
+		if (!user) {
+			await sendMsg(chatId, "❌ کاربر <b>" + uname + "</b> یافت نشد.");
+			return new Response("OK", { status: 200 });
+		}
+		const dynPath = encodeURIComponent("/stream/PANEL_ZEUS/" + ((user.uuid || "").split("-")[4] || "default"));
+		const isUnlim = (!user.limit_gb || user.limit_gb === 0) && (!user.expiry_days || user.expiry_days === 0);
+		const volTag = isUnlim ? "♾️ آن‌لیمیتد" : (user.limit_gb ? user.limit_gb + "GB" : "Free");
+
+		const npvDirect = "vless://" + user.uuid + "@www.speedtest.net:443?path=" + dynPath + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "#" + encodeURIComponent("🚀 NPV Tunnel | " + user.username + " (" + volTag + ")");
+		const npvFrag = "vless://" + user.uuid + "@104.21.40.3:443?path=" + dynPath + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "&fragment=100-200,1-1#" + encodeURIComponent("🧠 NPV Fragment | " + user.username + " (" + volTag + ")");
+
+		const npvMsg = "🚀 <b>کانفیگ‌های تک‌بر مخصوص NapsternetV (NPV Tunnel):</b>\n\n" +
+			"👤 کاربر: <b>" + user.username + (isUnlim ? " (♾️ آن‌لیمیتد)" : "") + "</b>\n" +
+			"📦 سقف حجم: <b>" + (user.limit_gb ? user.limit_gb + " GB" : "نامحدود") + "</b>\n" +
+			"⏳ مدت اعتبار: <b>" + (user.expiry_days ? user.expiry_days + " روز" : "نامحدود") + "</b>\n\n" +
+			"⚡ <b>کانفیگ ۱ (پرسرعت Speedtest CDN):</b>\n<code>" + npvDirect + "</code>\n\n" +
+			"🧠 <b>کانفیگ ۲ (ضد فیلتر هوشمند Fragment):</b>\n<code>" + npvFrag + "</code>\n\n" +
+			"💡 <b>نحوه اتصال:</b> روی کادر بالا بزنید تا کپی شود، سپس در NapsternetV گزینه + و Import config from Clipboard را بزنید.";
+
+		await sendMsg(chatId, npvMsg, {
+			inline_keyboard: [[{ text: "👤 مدیریت کاربر", callback_data: "view_u_" + user.id }]]
+		});
+		return new Response("OK", { status: 200 });
 	}
 
 	// FAST COMMAND: /del or /delete <username>
