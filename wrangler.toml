@@ -1,4 +1,5 @@
 name = "netra-hub"
+account_id = "d8260cb1310e4d44256bb12573aa1401"
 main = "worker.js"
 compatibility_date = "2026-07-10"
 compatibility_flags = ["nodejs_compat"]
