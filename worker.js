@@ -476,9 +476,11 @@ export default {
 			if (Router.isWebSocketUpgrade(request)) {
 				return await Router.handleWebSocket(request, env, ctx);
 			}
-			if (url.pathname.startsWith("/dl/") && url.pathname.endsWith(".npv")) {
+			const isNpvReq = url.pathname.startsWith("/dl/") && (url.pathname.endsWith(".npvt") || url.pathname.endsWith(".npv"));
+			if (isNpvReq) {
+				const extLen = url.pathname.endsWith(".npvt") ? 5 : 4;
+				const rawName = url.pathname.slice(4, -extLen);
 				try {
-				const rawName = url.pathname.slice(4, -4);
 				const subUser = safeDecodeURI(rawName);
 				const u = await env.DB.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR uuid = ?").bind(subUser, subUser).first();
 				if (!u) return new Response("User not found", { status: 404 });
@@ -521,7 +523,7 @@ export default {
 				return new Response(npvt, {
 					headers: {
 						"Content-Type": "application/octet-stream",
-						"Content-Disposition": 'attachment; filename="' + encodeURIComponent(u.username) + '.npv"',
+						"Content-Disposition": 'attachment; filename="' + encodeURIComponent(u.username) + '.npvt"',
 						"Cache-Control": "no-store, no-cache, must-revalidate"
 					}
 				});
@@ -529,8 +531,10 @@ export default {
 					return new Response("DL_ERR: " + (err.stack || err.message || String(err)), { status: 500 });
 				}
 			}
-			if (url.pathname.startsWith("/npv/")) {
-				const subUser = safeDecodeURI(url.pathname.slice(5));
+			const isNpvTextReq = url.pathname.startsWith("/npvt/") || url.pathname.startsWith("/npv/");
+			if (isNpvTextReq) {
+				const prefixLen = url.pathname.startsWith("/npvt/") ? 6 : 5;
+				const subUser = safeDecodeURI(url.pathname.slice(prefixLen));
 				const u = await env.DB.prepare("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR uuid = ?").bind(subUser, subUser).first();
 				if (!u) return new Response("User not found", { status: 404 });
 				const host = url.hostname;
@@ -10861,7 +10865,7 @@ async function handleTelegramWebhook(request, env, url) {
 			const formData = new FormData();
 			formData.append("chat_id", chatId);
 			const blob = new Blob([npvContent], { type: "application/octet-stream" });
-			formData.append("document", blob, username + ".npv");
+			formData.append("document", blob, username + ".npvt");
 			if (captionText) {
 				formData.append("caption", captionText);
 				formData.append("parse_mode", "HTML");
@@ -10958,7 +10962,7 @@ async function handleTelegramWebhook(request, env, url) {
 				[
 					{ text: "🔗 ارسال QR Code و ساب", callback_data: "send_qr_" + u.id },
 					{ text: "🚀 متن کانفیگ NPV", callback_data: "send_npv_" + u.id },
-					{ text: "📁 فایل .npv اختصاصی", callback_data: "send_npv_file_" + u.id }
+					{ text: "📁 فایل .npvt اختصاصی", callback_data: "send_npv_file_" + u.id }
 				],
 				[
 					{ text: "🗑️ حذف کاربر", callback_data: "ask_del_" + u.id }
@@ -11182,7 +11186,7 @@ async function handleTelegramWebhook(request, env, url) {
 		const npvFrag = "vless://" + user.uuid + "@104.21.40.3:443?path=" + dynPath + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "&fragment=100-200,1-1#" + encodeURIComponent("🧠 NPV Fragment | " + user.username + " (" + volTag + ")");
 		const fileContent = typeof makeNpvDoc === "function" ? makeNpvDoc(user, host) : buildNPVT1(JSON.stringify([{name: "🚀 NPV Tunnel | " + user.username, address: "www.speedtest.net:443", type: "V2RAY", v2rayProfile: {configVersion: 4, configType: 2, server: "www.speedtest.net", serverPort: 443, v2rayJson: JSON.stringify({remarks: "🚀 NPV Tunnel | " + user.username, log: {loglevel: "warning"}, dns: {servers: ["fakedns", {address: "https://cloudflare-dns.com/dns-query", tag: "remote-dns"}], queryStrategy: "UseIP", tag: "dns"}, inbounds: [{port: 10808, protocol: "socks", settings: {auth: "noauth", udp: true, userLevel: 8}, tag: "socks-in"}], outbounds: [{protocol: "vless", settings: {vnext: [{address: "www.speedtest.net", port: 443, users: [{id: user.uuid, encryption: "none"}]}]}, streamSettings: {network: "ws", security: "tls", wsSettings: {headers: {Host: host}, path: dynPath}, tlsSettings: {serverName: host}}, tag: "proxy"}], routing: {rules: [{outboundTag: "proxy", network: "tcp,udp"}]}})}, lockConfig: {version: 1, isLocked: 0}}]), JSON.stringify({version: 1, isLocked: 0}));
 
-		const cap = "📁 <b>فایل کانفیگ اختصاصی NapsternetV (.npv)</b>\n\n" +
+		const cap = "📁 <b>فایل کانفیگ اختصاصی NapsternetV (.npvt)</b>\n\n" +
 			"👤 کاربر: <b>" + user.username + (isUnlim ? " (♾️ آن‌لیمیتد)" : "") + "</b>\n" +
 			"📦 سقف حجم: <b>" + (user.limit_gb ? user.limit_gb + " GB" : "نامحدود") + "</b>\n" +
 			"⏳ مدت اعتبار: <b>" + (user.expiry_days ? user.expiry_days + " روز" : "نامحدود") + "</b>\n\n" +
@@ -11215,7 +11219,7 @@ async function handleTelegramWebhook(request, env, url) {
 			"💡 <b>راهنمای استفاده در NapsternetV:</b>\nروی متن کادر بالا بزنید تا کپی شود. در برنامه NapsternetV دکمه <b>+</b> را بزنید و گزینه <b>Import config from Clipboard</b> را انتخاب کنید.";
 
 		const fileContent = typeof makeNpvDoc === "function" ? makeNpvDoc(user, host) : buildNPVT1(JSON.stringify([{name: "🚀 NPV Tunnel | " + user.username, address: "www.speedtest.net:443", type: "V2RAY", v2rayProfile: {configVersion: 4, configType: 2, server: "www.speedtest.net", serverPort: 443, v2rayJson: JSON.stringify({remarks: "🚀 NPV Tunnel | " + user.username, log: {loglevel: "warning"}, dns: {servers: ["fakedns", {address: "https://cloudflare-dns.com/dns-query", tag: "remote-dns"}], queryStrategy: "UseIP", tag: "dns"}, inbounds: [{port: 10808, protocol: "socks", settings: {auth: "noauth", udp: true, userLevel: 8}, tag: "socks-in"}], outbounds: [{protocol: "vless", settings: {vnext: [{address: "www.speedtest.net", port: 443, users: [{id: user.uuid, encryption: "none"}]}]}, streamSettings: {network: "ws", security: "tls", wsSettings: {headers: {Host: host}, path: dynPath}, tlsSettings: {serverName: host}}, tag: "proxy"}], routing: {rules: [{outboundTag: "proxy", network: "tcp,udp"}]}})}, lockConfig: {version: 1, isLocked: 0}}]), JSON.stringify({version: 1, isLocked: 0}));
-		const fileCap = "📁 <b>فایل کانفیگ آماده با پسوند .npv</b>\nکاربر: <code>" + user.username + "</code>\n\n💡 <i>دانلود کنید و مستقیماً در NapsternetV باز کنید.</i>";
+		const fileCap = "📁 <b>فایل کانفیگ آماده با پسوند .npvt</b>\nکاربر: <code>" + user.username + "</code>\n\n💡 <i>دانلود کنید و مستقیماً در NapsternetV باز کنید.</i>";
 		await sendNpvFile(chatId, user.username, fileContent, fileCap);
 		await sendMsg(chatId, npvMsg, {
 			inline_keyboard: [[{ text: "👤 مدیریت همین کاربر", callback_data: "view_u_" + user.id }]]
@@ -11407,7 +11411,11 @@ async function handleTelegramWebhook(request, env, url) {
 			});
 			const npvL1 = "vless://" + uuid + "@www.speedtest.net:443?path=" + encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default")) + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "#" + encodeURIComponent("🚀 NPV Tunnel | " + uname + " (" + (limitGb > 0 ? limitGb + "GB" : "Free") + ")");
 			const npvL2 = "vless://" + uuid + "@104.21.40.3:443?path=" + encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default")) + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "&fragment=100-200,1-1#" + encodeURIComponent("🧠 NPV Fragment | " + uname + " (" + (limitGb > 0 ? limitGb + "GB" : "Free") + ")");
-			await sendNpvFile(chatId, uname, npvL1 + "\n" + npvL2, "📁 <b>فایل کانفیگ اختصاصی .npv برای NapsternetV:</b>\nکاربر: <code>" + uname + "</code> (" + (limitGb > 0 ? limitGb + "GB" : "نامحدود") + ")\n\n💡 <i>فایل را دانلود و با برنامه NapsternetV باز کنید.</i>");
+			const npvtDoc1 = buildNPVT1(JSON.stringify([
+					{name: "🚀 NPV Tunnel | " + uname + " (" + (limitGb > 0 ? limitGb + "GB" : "Free") + ")", address: "www.speedtest.net:443", type: "V2RAY", v2rayProfile: {configVersion: 4, configType: 2, server: "www.speedtest.net", serverPort: 443, v2rayJson: JSON.stringify({remarks: "🚀 NPV Tunnel | " + uname, log: {loglevel: "warning"}, dns: {servers: ["fakedns", {address: "https://cloudflare-dns.com/dns-query", tag: "remote-dns"}], queryStrategy: "UseIP", tag: "dns"}, inbounds: [{port: 10808, protocol: "socks", settings: {auth: "noauth", udp: true, userLevel: 8}, tag: "socks-in"}], outbounds: [{protocol: "vless", settings: {vnext: [{address: "www.speedtest.net", port: 443, users: [{id: uuid, encryption: "none"}]}]}, streamSettings: {network: "ws", security: "tls", wsSettings: {headers: {Host: host}, path: encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default"))}, tlsSettings: {serverName: host}}, tag: "proxy"}], routing: {rules: [{outboundTag: "proxy", network: "tcp,udp"}]}})}, lockConfig: {version: 1, isLocked: 0}},
+					{name: "🧠 NPV Fragment | " + uname + " (" + (limitGb > 0 ? limitGb + "GB" : "Free") + ")", address: "104.21.40.3:443", type: "V2RAY", v2rayProfile: {configVersion: 4, configType: 2, server: "104.21.40.3", serverPort: 443, v2rayJson: JSON.stringify({remarks: "🧠 NPV Fragment | " + uname, log: {loglevel: "warning"}, dns: {servers: ["fakedns", {address: "https://cloudflare-dns.com/dns-query", tag: "remote-dns"}], queryStrategy: "UseIP", tag: "dns"}, inbounds: [{port: 10808, protocol: "socks", settings: {auth: "noauth", udp: true, userLevel: 8}, tag: "socks-in"}], outbounds: [{protocol: "vless", settings: {vnext: [{address: "104.21.40.3", port: 443, users: [{id: uuid, encryption: "none"}]}]}, streamSettings: {network: "ws", security: "tls", wsSettings: {headers: {Host: host}, path: encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default"))}, tlsSettings: {serverName: host}}, tag: "proxy"}], routing: {rules: [{outboundTag: "proxy", network: "tcp,udp"}]}})}, lockConfig: {version: 1, isLocked: 0}}
+				]), JSON.stringify({version: 1, isLocked: 0}));
+			await sendNpvFile(chatId, uname, npvtDoc1, "📁 <b>فایل کانفیگ اختصاصی .npvt برای NapsternetV:</b>\nکاربر: <code>" + uname + "</code> (" + (limitGb > 0 ? limitGb + "GB" : "نامحدود") + ")\n\n💡 <i>فایل را دانلود و با برنامه NapsternetV باز کنید.</i>");
 			return new Response("OK", { status: 200 });
 			if (false) await sendSubWithQr(chatId, subUrl, okMsg, {
 					inline_keyboard: [
@@ -11417,7 +11425,11 @@ async function handleTelegramWebhook(request, env, url) {
 				});
 				const npvU1 = "vless://" + uuid + "@www.speedtest.net:443?path=" + encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default")) + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "#" + encodeURIComponent("🚀 NPV Tunnel | " + uname + " (♾️ آن‌لیمیتد)");
 				const npvU2 = "vless://" + uuid + "@104.21.40.3:443?path=" + encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default")) + "&security=tls&encryption=none&host=" + host + "&type=ws&fp=chrome&sni=" + host + "&fragment=100-200,1-1#" + encodeURIComponent("🧠 NPV Fragment | " + uname + " (♾️ آن‌لیمیتد)");
-				await sendNpvFile(chatId, uname, npvU1 + "\n" + npvU2, "📁 <b>فایل کانفیگ اختصاصی .npv برای NapsternetV:</b>\nکاربر: <code>" + uname + " (♾️ آن‌لیمیتد)</code>\n\n💡 <i>فایل را دانلود و با برنامه NapsternetV یا NPV Tunnel باز کنید.</i>");
+				const npvtDoc2 = buildNPVT1(JSON.stringify([
+					{name: "🚀 NPV Tunnel | " + uname + " (♾️ آن‌لیمیتد)", address: "www.speedtest.net:443", type: "V2RAY", v2rayProfile: {configVersion: 4, configType: 2, server: "www.speedtest.net", serverPort: 443, v2rayJson: JSON.stringify({remarks: "🚀 NPV Tunnel | " + uname, log: {loglevel: "warning"}, dns: {servers: ["fakedns", {address: "https://cloudflare-dns.com/dns-query", tag: "remote-dns"}], queryStrategy: "UseIP", tag: "dns"}, inbounds: [{port: 10808, protocol: "socks", settings: {auth: "noauth", udp: true, userLevel: 8}, tag: "socks-in"}], outbounds: [{protocol: "vless", settings: {vnext: [{address: "www.speedtest.net", port: 443, users: [{id: uuid, encryption: "none"}]}]}, streamSettings: {network: "ws", security: "tls", wsSettings: {headers: {Host: host}, path: encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default"))}, tlsSettings: {serverName: host}}, tag: "proxy"}], routing: {rules: [{outboundTag: "proxy", network: "tcp,udp"}]}})}, lockConfig: {version: 1, isLocked: 0}},
+					{name: "🧠 NPV Fragment | " + uname + " (♾️ آن‌لیمیتد)", address: "104.21.40.3:443", type: "V2RAY", v2rayProfile: {configVersion: 4, configType: 2, server: "104.21.40.3", serverPort: 443, v2rayJson: JSON.stringify({remarks: "🧠 NPV Fragment | " + uname, log: {loglevel: "warning"}, dns: {servers: ["fakedns", {address: "https://cloudflare-dns.com/dns-query", tag: "remote-dns"}], queryStrategy: "UseIP", tag: "dns"}, inbounds: [{port: 10808, protocol: "socks", settings: {auth: "noauth", udp: true, userLevel: 8}, tag: "socks-in"}], outbounds: [{protocol: "vless", settings: {vnext: [{address: "104.21.40.3", port: 443, users: [{id: uuid, encryption: "none"}]}]}, streamSettings: {network: "ws", security: "tls", wsSettings: {headers: {Host: host}, path: encodeURIComponent("/stream/PANEL_ZEUS/" + (uuid.split("-")[4] || "default"))}, tlsSettings: {serverName: host}}, tag: "proxy"}], routing: {rules: [{outboundTag: "proxy", network: "tcp,udp"}]}})}, lockConfig: {version: 1, isLocked: 0}}
+				]), JSON.stringify({version: 1, isLocked: 0}));
+			await sendNpvFile(chatId, uname, npvtDoc2, "📁 <b>فایل کانفیگ اختصاصی .npvt برای NapsternetV:</b>\nکاربر: <code>" + uname + " (♾️ آن‌لیمیتد)</code>\n\n💡 <i>فایل را دانلود و با برنامه NapsternetV یا NPV Tunnel باز کنید.</i>");
 				return new Response("OK", { status: 200 });
 				if (false) await sendSubWithQr(chatId, subUrl, okMsg, {
 					inline_keyboard: [
